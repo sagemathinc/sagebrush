@@ -2,7 +2,7 @@
 // Locks): a workspace with the journal active and DEV's docsync on, a notebook store per notebook, and doc-sync.ts's
 // DocSync on a minimal account socket to the reference server (hello, welcome, then the document requests).  The
 // harness drives two of these, as two devices of one account.
-import { W, N, H, DS, P, NB, ST, E } from "./all.js";
+import { W, N, H, DS, P, NB, ST, E, DK } from "./all.js";
 
 const J = JSON.stringify;
 const T = { stores: new Map(), pending: new Map(), req: 0, log: [], warns: [] };
@@ -50,6 +50,40 @@ T.useKeys = async (account, gens, current) => {
   });
   return true;
 };
+/** End-to-end encryption with a page's own key provider (doc-keys.ts): this device's DocSync made again, before it
+ * connects, over fixture epochs (epoch n's secret is 32 bytes of `fills[n]`; an epoch absent from `fills` is one this
+ * device doesn't hold) at the chain this device last verified (T.setChain), and the harness's one declaration store,
+ * shared by every device of the account as the sealed index is (the front's /test/decl). */
+T.useDocKeys = async (account, fills) => {
+  T.chain = { head: "h1", currentEpoch: 1 };
+  const held = new Map();
+  const epochs = {
+    account,
+    chain: async () => ({ ...T.chain }),
+    epochKeys: async (n) => {
+      if (!(String(n) in fills)) return null;
+      if (!held.has(n)) held.set(n, await E.deriveEpochKeys(new Uint8Array(32).fill(fills[n]), account, n));
+      return held.get(n);
+    },
+  };
+  const b64 = (u) => btoa(String.fromCharCode(...u)), unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const ask = async (q) => {
+    const r = await (await fetch("/test/decl", { method: "POST", headers: { "content-type": "application/json" }, body: J(q) })).json();
+    return r ? { ...r, wrappedCek: unb64(r.wrappedCek) } : null;
+  };
+  const declarations = {
+    current: (doc, head) => ask({ op: "current", doc, head }),
+    exact: (doc, cekId, keyEpoch) => ask({ op: "exact", doc, cekId, keyEpoch }),
+    declare: (d) => ask({ op: "declare", d: { ...d, wrappedCek: b64(d.wrappedCek) } }),
+  };
+  T.ds = new DS.DocSync({
+    retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); },
+    keys: DK.docKeys({ epochs, declarations }),
+  });
+  return true;
+};
+/** The chain this device last verified moved: its head, and the account's current epoch at it. */
+T.setChain = (head, currentEpoch) => { T.chain = { head, currentEpoch }; return true; };
 /** The account socket (the front adds this device's session), hello, welcome, then DocSync connected on it. */
 T.connect = async (dev, account) => {
   const owner = await P.accountHash(account);

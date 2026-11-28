@@ -4931,6 +4931,35 @@ async function sealedFixture(accountId) {
 const sealedSends = (log) => log.sent.filter((m) => m.t === "sops");
 const itemsOf = (sends) => sends.flatMap((m) => m.json.map((j) => JSON.parse(j)));
 
+// An end-to-end client never connects notebooks' sync made without keys: it would send their patches unsealed. A
+// plaintext client connects one as before, and an end-to-end client connects a keyed one.
+async function sealedDocsRefused() {
+  const id = await account();
+  const f = await sealedFixture(id);
+  // (a DocSync whose connection is counted: the one place it could begin sending patches)
+  const spied = (keys) => {
+    const ds = new W.DocSync(keys ? { keys } : {});
+    const was = ds.connected.bind(ds);
+    ds.connects = 0;
+    ds.connected = (x) => { ds.connects++; return was(x); };
+    return ds;
+  };
+  const keys = { account: f.provider.account, current: async () => { throw new Error("no patch is sealed in this case"); }, find: async () => null };
+  for (const [what, e2e, docKeys, want] of [
+    ["an end-to-end client given a DocSync without keys", true, null, 0],
+    ["a plaintext client given a DocSync without keys", false, null, 1],
+    ["an end-to-end client given a keyed DocSync", true, keys, 1],
+  ]) {
+    const w = await fresh();
+    const ds = spied(docKeys);
+    const c = client(w, { docs: ds, ...(e2e ? { e2e: { keys: f.provider, kit: f.kit } } : {}) });
+    check(await until(() => settled(w, c)), `sealed docs: ${what}: synced`);
+    await sleep(300);
+    check(ds.connects === want && c.stats.docsRefused === (want ? 0 : 1) && ds.sealed === !!docKeys,
+      `sealed docs: ${what}: ${want ? "connected" : "never connected (no patch can go), the refusal counted"}: ` + J({ connects: ds.connects, refused: c.stats.docsRefused, sealed: ds.sealed }));
+    await stop(c);
+  }
+}
 async function sealedSend() {
   const id = await account();
   const f = await sealedFixture(id);
@@ -5941,7 +5970,7 @@ async function docKeyExact() {
   await stop(b2);
 }
 
-const CASES = { blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
+const CASES = { sealedDocsRefused, blobConflicts, readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Retry, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace, sealedSend, sealedLostAck, sealedRefusal, sealedStale, sealedBusy, sealedLogFull, sealedForeign, sealedTamper, sealedEchoFirst, sealedEchoNoKit, sealedEchoMalformed, sealedPull, sealedPullHalt, releaseSweep, releaseHistory, releaseCurrent, releaseRace, releaseUnexplained, releasePlaintext, releaseRetry, releaseRoom, releaseHistoryEarly, releaseHistoryView, releaseBacklog, releaseGeneration, releaseGenerationMid, docKeyDeclare, docKeyRace, docKeyEpoch, docKeyExact };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

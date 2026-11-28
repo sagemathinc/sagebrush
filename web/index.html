@@ -846,7 +846,7 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncAllowed, untilAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, pageDocKeys, readJournal, docSyncAllowed, untilAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 import { mountAccount } from "./workspace/account.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
@@ -5342,8 +5342,10 @@ const docSyncReady = (async () => {
   if (!(await allowed(20_000))) await untilAllowed({ onChange: (f) => owner.onChange(f), running: () => owner.clientRunning(0), allowed: () => allowed(0) });
   return (await enableDocSync({
     loadHistory,
-    // (a document's changes stored from another device: its Files entry's last-modified time, here too)
-    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}) }),
+    // (a document's changes stored from another device: its Files entry's last-modified time, here too; and the
+    // account's end-to-end keys, read now, from the client the owner started (web/workspace/doc-keys.ts): every patch
+    // then sealed on the wire)
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}), keys: pageDocKeys(owner) }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     register: registerJournalWriter,
     setReadOnly: (ro) => nb.setReadOnly(ro),

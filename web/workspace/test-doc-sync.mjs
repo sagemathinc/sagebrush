@@ -42,6 +42,7 @@ writeFileSync(join(src, "entry.js"), [
   `export * as NB from ${J(join(here, "../notebook/notebook.js"))};`,
   `export * as ST from ${J(join(here, "../notebook/stores.js"))};`,
   `export * as E from ${J(join(here, "e2e/index.ts"))};`,
+  `export * as DK from ${J(join(here, "doc-keys.ts"))};`,
 ].join("\n"));
 const b = await Bun.build({ entrypoints: [join(src, "entry.js")], outdir: site, naming: "all.js", target: "browser", format: "esm" });
 rmSync(src, { recursive: true, force: true });
@@ -80,12 +81,22 @@ if (CLOUD) {
 } else ref = new ReferenceServer();
 // (each device's session, as its Cookie header's name=value)
 const signIn = async () => (CLOUD ? await cloud.signIn(ACCOUNT) : `${SESSION_COOKIE}=${ref.signIn(ACCOUNT)}`);
-const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn(), E: await signIn(), F: await signIn(), G: await signIn() };
+const sessions = { A: await signIn(), B: await signIn(), C: await signIn(), D: await signIn(), E: await signIn(), F: await signIn(), G: await signIn(), H: await signIn(), I: await signIn(), J: await signIn() };
 // (sync on for the account, as its first device's enable does: off, the server refuses every hello `readonly`)
 const enabled = await (CLOUD ? cloud.enable(sessions.A) : ref.fetch(new Request("http://ref/api/sync/v1/enable", { method: "POST", headers: { cookie: sessions.A } }))).then((r) => r.json());
 if (enabled.state !== "active") { emit.enableFail(enabled); process.exit(1); }
 // (what the front does to the next `batches` sent to a device: rewrite its chain, its owner, or add a snapshot)
 const tamper = { A: null, B: null };
+// (case K's declaration store: the sealed index's document key declarations as one fixture every device shares, in
+// the order declared; a declaration for a document and epoch that already has one answers that one, as the index
+// settles a race)
+const decls = [];
+const declAnswer = (q) => {
+  if (q.op === "current") return decls.findLast((d) => d.document === q.doc) ?? null;
+  if (q.op === "exact") return decls.find((d) => d.document === q.doc && d.cekId === q.cekId && d.keyEpoch === q.keyEpoch) ?? null;
+  if (q.op === "declare") return decls.find((d) => d.document === q.d.document && d.keyEpoch === q.d.keyEpoch) ?? (decls.push(q.d), q.d);
+  return null;
+};
 // (the next request of a kind answered with a refusal instead: the request still goes to the server, which does what
 // it does with it, and only its answer is replaced, as a lost answer and a refusal would look; on either server)
 const fakes = { batch: [] };
@@ -143,6 +154,7 @@ const front = Bun.serve({
     // (case 14's real owners and Sync panel: the session's account, and the sync API with device D's session, as the
     // site serves them on its own origin)
     if (u.pathname === "/api/share/me") return Response.json({ account_id: ACCOUNT });
+    if (u.pathname === "/test/decl" && req.method === "POST") return Response.json(declAnswer(await req.json()));
     // (the relay control's two routes to the real server's status, differing only in the relay (case R))
     const relayRoute = /^\/relay-(old|new)(\/api\/sync\/v1\/status)$/.exec(u.pathname);
     if (u.pathname.startsWith("/api/sync/") || relayRoute) {
@@ -1504,6 +1516,60 @@ try {
   const [fs5, fj5] = [await Fd.call("stopped"), await Fd.call("journal", NE5)];
   check(fs5[NE5]?.code === "e2e" && !fj5.cursor, "E-5: an unsealed patch reaching a device with keys is refused (e2e), never applied: " + J(fs5[NE5]));
   for (const d of [Ed, Fd, Gd]) await d.call("disconnect");
+
+  progress("case K");
+  // K. The same with each device's own key provider (doc-keys.ts, as a page gives one): fixture epochs, and one
+  // declaration store the devices share (the front's, standing for the sealed index). H and I hold epochs 1 and 2;
+  // J holds only epoch 1. No device is given a generation: each comes from the store.
+  const KFILLS = { 1: 0x51, 2: 0x52 };
+  const Hd = await device("H"), Id = await device("I"), Jd = await device("J");
+  await Hd.call("useDocKeys", E2E_ACCT, KFILLS);
+  await Id.call("useDocKeys", E2E_ACCT, KFILLS);
+  await Jd.call("useDocKeys", E2E_ACCT, { 1: KFILLS[1] });
+  await Hd.call("connect", "H", ACCOUNT);
+  await Id.call("connect", "I", ACCOUNT);
+  const hiIdle = async () => { for (let i = 0; i < 3; i++) await Promise.all([Hd.call("idle"), Id.call("idle")]); };
+  // (a stored slice's generation: its format byte, then the cekId field and the key epoch)
+  const genOf = (b) => { const n = b.readUInt32BE(1); return { format: b[0], cekId: b.subarray(5, 5 + n).toString(), keyEpoch: Number(b.readBigUInt64BE(5 + n)) }; };
+  // K-1: H's new notebook declares one generation, which I finds in the store and opens; I's edit adds none
+  const NK = "e2e00000-0000-4000-8000-0000000000a1";
+  await Hd.call("open", NK, [["a", "SECRET-K1"]]);
+  await Hd.call("kick", NK);
+  await hiIdle();
+  const d1 = decls.filter((d) => d.document === NK);
+  check(d1.length === 1 && d1[0].keyEpoch === 1 && d1[0].head === "h1" && Buffer.from(d1[0].wrappedCek, "base64").length === 60 && !J(d1[0]).includes("SECRET"), "K-1: H's first sealing declares one generation of epoch 1 at the chain's head, its key only wrapped (60 bytes): " + J(d1.map((d) => [d.keyEpoch, d.head])));
+  if (!CLOUD) {
+    const gens = (ref.controls.doc(ACCOUNT, NK)?.batches ?? []).map((b) => Buffer.from(b.body)).map((b) => ({ ...genOf(b), plain: b.includes("SECRET") }));
+    check(gens.length >= 1 && gens.every((g) => g.format === 1 && g.cekId === d1[0]?.cekId && g.keyEpoch === 1 && !g.plain), "K-1: the server stores only slices sealed under that generation, none of the text: " + J(gens));
+  }
+  const ko = await Id.call("open", NK);
+  check(ko.codes === J([["a", "SECRET-K1"]]), "K-1: …I, given no generation, finds it in the declarations and opens the notebook: " + ko.codes);
+  check(await Id.call("edit", NK, [["a", "SECRET-K1"], ["b", "SECRET-I1"]]) === true, "K-1: I's edit saved");
+  await hiIdle();
+  const hr = await Hd.call("record", NK);
+  check(hr.codes === J([["a", "SECRET-K1"], ["b", "SECRET-I1"]]) && decls.filter((d) => d.document === NK).length === 1, "K-1: …and I's sealed edit reaches H under the same generation, no second declared: " + hr.codes);
+  // K-2: the chain moves to epoch 2 (as a device's removal moves it): the next edit declares a generation of epoch 2,
+  // which I opens beside the old one
+  await Hd.call("setChain", "h2", 2);
+  await Id.call("setChain", "h2", 2);
+  check(await Hd.call("edit", NK, [["a", "SECRET-K2"], ["b", "SECRET-I1"]]) === true, "K-2: H's edit after the new epoch saved");
+  await hiIdle();
+  const d2 = decls.filter((d) => d.document === NK);
+  check(d2.length === 2 && d2[1].keyEpoch === 2 && d2[1].head === "h2" && d2[1].cekId !== d2[0].cekId, "K-2: the first sealing at the new epoch declares a new generation of epoch 2 at the new head: " + J(d2.map((d) => [d.keyEpoch, d.head])));
+  if (!CLOUD) {
+    const last = (ref.controls.doc(ACCOUNT, NK)?.batches ?? []).map((b) => genOf(Buffer.from(b.body))).at(-1);
+    check(last?.keyEpoch === 2 && last.cekId === d2[1]?.cekId, "K-2: the server's newest slice names that generation: " + J(last));
+  }
+  const ir = await Id.call("record", NK);
+  check(ir.codes === J([["a", "SECRET-K2"], ["b", "SECRET-I1"]]), "K-2: …and I opens it beside the old generation's patches: " + ir.codes);
+  // K-3: J holds only epoch 1: the notebook's epoch-2 slice is refused (e2e), never applied with a guessed key
+  await Jd.call("setChain", "h2", 2);
+  await Jd.call("connect", "J", ACCOUNT);
+  await Jd.call("kick", NK, true);
+  await Jd.call("idle");
+  const [js3, jr3] = [await Jd.call("stopped"), await Jd.call("record", NK)];
+  check(js3[NK]?.code === "e2e" && /epoch 2's keys/.test(js3[NK]?.detail ?? "") && !(jr3?.codes ?? "").includes("SECRET-K2"), "K-3: a device without epoch 2's keys refuses the notebook's epoch-2 slice (e2e), and never shows that edit: " + J(js3[NK]));
+  for (const d of [Hd, Id, Jd]) await d.call("disconnect");
 
   censusAt("cases-done");
   if (!emit.failures(results, errors)) {
